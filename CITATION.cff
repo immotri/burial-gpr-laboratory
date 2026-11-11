@@ -1,13 +1,13 @@
 cff-version: 1.2.0
 message: "Please cite this software and gprMax when using them in published work."
 type: software
-title: "Burial GPR Laboratory"
-version: 1.1.0
+title: "Cemetery GPR Laboratory"
+version: 2.0.0
 authors:
   - name: "Burial GPR Laboratory contributors"
 license: MIT
 abstract: >-
-  Interactive procedural burial geometry, linked material sections and a
+  Interactive procedural cemetery and inhumation geometry, linked material sections and a
   reproducible gprMax workflow for electromagnetic modelling and spatial
   sampling experiments in archaeological prospection.
 keywords:

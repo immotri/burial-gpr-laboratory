@@ -28,6 +28,8 @@ jobs:
         run: python -m unittest discover -s toolkit -v
       - name: Shared model and section checks
         run: python scripts/test_geometry_parity.py
+      - name: Cemetery geometry and materials
+        run: python scripts/test_cemetery_parity.py
       - name: Build downloadable toolkit
         run: python scripts/build_release.py
       - name: Check static website assets and JavaScript

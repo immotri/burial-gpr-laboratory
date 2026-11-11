@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.0.0
+
+- General cemetery scene with 1–12 independently placed and rotated graves.
+- Five shaft plans, three wall profiles, earth graves, coffins and stone cists.
+- Supine, prone, lateral and flexed body templates with stature scaling.
+- Per-grave age, backfill properties and stable retention seeds.
+- Explicit cut order, overlapping-grave notices and material replacement.
+- Clickable plan, linked sections, selected-grave focus and seven starter scenes.
+- Shared framed volumes and exact cell-centre rasterisation for rotated 3D export.
+- Backward-compatible Python loader plus editable browser import conversion.
+- Cemetery parity, occupancy, recutting and export regressions; 2D/3D solver smoke cases.
+
+
 ## 1.1.0
 
 - Detailed shared procedural anatomy and shaped hollow vessels.

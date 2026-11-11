@@ -1,3 +1,74 @@
+# Cemetery extension (version 2.0)
+
+The toolkit now supports general inhumation graves and cemeteries. Start with
+`cemetery.json` or `examples/mixed.json`; `model.json`, `quickstart.json` and the
+existing verification arrays retain the original version 1 burial geometry.
+Exported browser JSON uses schema 2 and geometry 3.
+
+```bash
+python burial_gpr.py estimate cemetery.json
+python burial_gpr.py generate cemetery.json --out runs/cemetery
+python burial_gpr.py run runs/cemetery --limit-traces 3 --threads 4
+python burial_gpr.py collect runs/cemetery
+```
+
+A scene contains 1–12 graves. Each has a stable ID, retention-seed offset,
+position, azimuth, elapsed age, shaft, container, body-template and backfill
+parameters. All share the background field and acquisition definition.
+Arbitrary world rotations are carried through to the solver. Profiles remain
+parallel to the global x/y axes; select their position in the browser.
+
+Shaft plans: rectangular, rounded-ended, oval, trapezoidal and anthropomorphic.
+Profiles: vertical, linear taper or an abrupt shoulder/step. Dimensions describe
+the opening; inset reduces both length and width by twice its value below the
+step or at the base. Cut depth is positive below ground. Containers must fit
+the lower shaft; invalid dimensions are rejected, not clipped silently.
+
+Construction can be earth (no explicitly modelled cloth), wood coffin or stone
+cist. All use the same generic skeletal template, with scaled stature and
+supine, prone, lateral extended or illustrative lateral flexed positions.
+The model is skeletal even at elapsed age zero: it does not simulate fresh
+bodies, tissue loss or decomposition fluid chemistry. Uniform scaling does not
+represent paediatric bone morphology or age-specific ossification.
+
+Each backfill has its own CRIM pore mixture and assigned DC conductivity.
+Wood residues mix with their own grave fill according to that grave's age.
+Stone is an isotropic CRIM solid/pore mixture with user-editable priors:
+solid relative permittivity 6, porosity 0.12, bulk water fraction 0.05 and DC
+conductivity 0.002 S/m. These are scenario inputs, not measured values or a
+universal description of stone. The environment preset resets all grave
+backfills and shared preservation/moisture priors; ages stay individual.
+
+Grave order is explicit: later cuts and contents overwrite earlier volumes.
+Elapsed age does not sort the list. Recutting is geometric truncation; no
+redeposition, displaced bone or secondary fill is inferred. One articulated
+body is supported per shaft; shared chambers and multiple simultaneous bodies
+need a future extension. The model does not explicitly represent shrouds,
+brick joints, groundwater flow, soft tissue or finite antenna housings.
+
+For general geometry, the exporter evaluates framed-volume occupancy at mesh
+cell centres. The 3D implementation compresses exact masks into non-overlapping
+boxes per object and preserves the construction order. It limits working
+memory to one XY plane of one object. Fine rotated solids can produce very
+large input files; always estimate first, simplify an experiment and establish
+mesh/boundary convergence. Output metadata identifies the rasterisation method
+and lists objects that occupy no cell centres. A successful coarse solve is
+only a pipeline test.
+
+`examples/smoke_2d.json` and `examples/smoke_3d.json` are deliberately coarse,
+short-window regression cases. Their actual solver results are summarised in
+`verification/cemetery_solver_checks.json`. They cannot establish burial
+visibility, resolution or penetration. Existing verification images below
+come from the original single-coffin example, not the new cemetery.
+
+The browser upgrades legacy files into a general editable grave; this is a
+parameter conversion, not exact legacy artefact placement. The Python loader
+still accepts schema 1 without conversion for reproducibility. For schema 2,
+`graves` is authoritative; top-level `coffin`, `targets` and `age_years` remain
+compatibility context only.
+
+---
+
 # Burial GPR Laboratory v1.1
 
 A reproducible scenario builder and gprMax 4.0.1 export workflow for a reference-inspired Viking Age coffin burial. The browser previews geometry; gprMax solves Maxwell's equations locally. This is a working research starting point, not a calibrated reconstruction or a validated prediction of detectability.

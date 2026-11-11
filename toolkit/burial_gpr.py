@@ -11,7 +11,7 @@ from scipy.optimize import lsq_linear
 C = 299792458.0
 EPS0 = 8.8541878128e-12
 TAUS = np.array([9.231e-12, 5e-11, 2e-10])
-VERSION = '1.1.0'
+VERSION = '2.0.0'
 DEFAULT = Path(__file__).with_name('model.json')
 
 
@@ -23,7 +23,9 @@ def merge(base, change):
 
 
 def load(path):
-    c = merge(json.loads(DEFAULT.read_text()), json.loads(Path(path).read_text()))
+    raw=json.loads(Path(path).read_text())
+    base=Path(__file__).with_name('cemetery.json') if raw.get('schema_version')==2 else DEFAULT
+    c = merge(json.loads(base.read_text()), raw)
     validate(c)
     return c
 
@@ -36,6 +38,8 @@ def validate(c):
             for v in obj: finite(v)
         elif isinstance(obj,(int,float)) and not math.isfinite(obj): raise ValueError('Non-finite parameter')
     finite(c)
+    if c.get('schema_version') not in [1,2]:raise ValueError('Unsupported project schema')
+    if c.get('schema_version')==2 and not isinstance(c.get('graves'),list):raise ValueError('Schema 2 requires a graves array')
     d,b,s,q=c['domain'],c['coffin'],c['soil'],c['survey']
     for v in [d['x_m'],d['y_m'],d['soil_depth_m'],d['air_m'],b['length_m'],b['width_m'],b['height_m'],b['board_m'],q['cell_m'],q['time_window_ns'],q['trace_spacing_m'],q['line_spacing_m'],s['correlation_m']]:
         if v<=0: raise ValueError('Lengths, spacings and time window must be positive')
@@ -53,11 +57,17 @@ def validate(c):
         if not 0<s[k+'_porosity']<1 or not 0<=s[k+'_saturation']<=1: raise ValueError('Invalid target porosity/saturation')
     if any(s[k]<0 for k in ['sigma_S_m','fill_sigma_S_m','topsoil_sigma_S_m','heterogeneity']): raise ValueError('Loss and heterogeneity cannot be negative')
     if s['heterogeneity']>0.1: raise ValueError('Water-fraction heterogeneity is capped at 0.1')
-    if b['height_m']<.28: raise ValueError('Coffin height must be at least 0.28 m for this object template')
-    if b['board_m']>=min(b['width_m'],b['height_m'])/3: raise ValueError('Boards exceed coffin dimensions')
-    if b['length_m']<1.85 or b['width_m']<0.58: raise ValueError('This adult skeleton template requires length ≥1.85 m and width ≥0.58 m')
-    if b['top_depth_m']<s['topsoil_thickness_m'] or b['top_depth_m']+b['height_m']+0.20>=d['soil_depth_m']: raise ValueError('Coffin must fit beneath topsoil and above the basal margin')
-    if b['length_m']+.6>=d['x_m'] or b['width_m']+.6>=d['y_m']: raise ValueError('Add at least 0.3 m domain margin around the coffin')
+    if c.get('graves') is not None:
+        from cemetery_geometry import validate_graves
+        validate_graves(c,GeometryRNG)
+        m=c['materials']
+        if not 0<m['stone_porosity']<1 or not 0<=m['stone_water_fraction']<=m['stone_porosity']:raise ValueError('Invalid stone pore fractions')
+    else:
+        if b['height_m']<.28: raise ValueError('Coffin height must be at least 0.28 m for this object template')
+        if b['board_m']>=min(b['width_m'],b['height_m'])/3: raise ValueError('Boards exceed coffin dimensions')
+        if b['length_m']<1.85 or b['width_m']<0.58: raise ValueError('This adult skeleton template requires length ≥1.85 m and width ≥0.58 m')
+        if b['top_depth_m']<s['topsoil_thickness_m'] or b['top_depth_m']+b['height_m']+0.20>=d['soil_depth_m']: raise ValueError('Coffin must fit beneath topsoil and above the basal margin')
+        if b['length_m']+.6>=d['x_m'] or b['width_m']+.6>=d['y_m']: raise ValueError('Add at least 0.3 m domain margin around the coffin')
     if q['mode'] not in ['2D','3D'] or q['profile_axis'] not in ['x','y']: raise ValueError('Invalid simulation mode or profile direction')
     if q['polarisation'] not in ['x','y']: raise ValueError('Use horizontal dipole polarisation x or y')
     if q['mode']=='2D' and q['polarisation']==q['profile_axis']: raise ValueError('2D TM electric dipole must be perpendicular to the profile')
@@ -103,6 +113,12 @@ def spectra(c,f):
     for i,t in enumerate(np.linspace(-3,3,13)):
         for base,p,theta in [('subsoil',s['porosity'],s['water_fraction']),('topsoil',s['porosity'],s['topsoil_water_fraction'])]:
             vals[f'{base}_{i}']=crim(f,p,np.clip(theta+t*s['heterogeneity'],0,p),m['mineral_eps'])
+    if c.get('graves') is not None:
+        from cemetery_geometry import grave_state
+        vals['stone']=crim(f,m['stone_porosity'],m['stone_water_fraction'],m['stone_solid_eps'])
+        for i,g in enumerate(c['graves']):
+            gs=grave_state(c,g);fill=g['fill'];vals[f'fill_g{i}']=crim(f,fill['porosity'],fill['water_fraction'],m['mineral_eps'])
+            vals[f'wood_g{i}']=(gs['wood']*np.sqrt(wood)+(1-gs['wood'])*np.sqrt(vals[f'fill_g{i}']))**2
     return vals
 
 
@@ -113,6 +129,11 @@ def conductivities(c):
     for i,t in enumerate(np.linspace(-3,3,13)):
         for base in ['subsoil','topsoil']:
             v[f'{base}_{i}']=v[base]*max(.1,1+.15*t)
+    if c.get('graves') is not None:
+        from cemetery_geometry import grave_state
+        v['stone']=m['stone_sigma_S_m']
+        for i,g in enumerate(c['graves']):
+            gs=grave_state(c,g);v[f'fill_g{i}']=g['fill']['sigma_S_m'];v[f'wood_g{i}']=gs['wood']*m['wood_sigma_S_m']+(1-gs['wood'])*g['fill']['sigma_S_m']
     return v
 
 
@@ -139,14 +160,20 @@ def fit_materials(c):
 
 
 def estimate(c):
+    targets=c['targets']
+    if c.get('graves') is not None:
+        targets=dict(bones=any(g['contents']['bones'] for g in c['graves']),wood=any(g['construction']=='coffin' for g in c['graves']),iron=any(g['contents']['iron'] for g in c['graves']),pottery=any(g['contents']['pottery'] for g in c['graves']),void=any(g['contents']['void'] for g in c['graves']))
     d,q=c['domain'],c['survey']; h=q['cell_m']; f=q['frequency_MHz']*1e6
     e=spectra(c,np.array([f,2.5*f])); used=['subsoil','topsoil','fill']
     for t in ['wood','bone','pottery']:
-        if c['targets'][t if t!='bone' else 'bones']: used.append(t)
-    if c['targets']['void'] and state(c)['void']>.15 and c['environment']=='waterlogged': used.append('water')
+        if targets[t if t!='bone' else 'bones']: used.append(t)
+    if targets['void'] and state(c)['void']>.15 and c['environment']=='waterlogged': used.append('water')
     # Include wettest moisture bin, because it sets the slowest dielectric wavelength.
     used+=['subsoil_12','topsoil_12']
-    if c['targets']['iron']: used.append('rust')
+    if targets['iron']: used.append('rust')
+    if c.get('graves') is not None:
+        used += [f'fill_g{i}' for i in range(len(c['graves']))]+[f'wood_g{i}' for i,g in enumerate(c['graves']) if g['construction']=='coffin']
+        if any(g['construction']=='cist' for g in c['graves']):used.append('stone')
     maxe=max(float(np.max(v.real)) for k,v in e.items() if k in used)
     n=math.sqrt(maxe); wavelength=C/(2.5*f*n)
     extent=d['x_m'] if q['profile_axis']=='x' else d['y_m']
@@ -160,7 +187,13 @@ def estimate(c):
     across=d['y_m'] if q['profile_axis']=='x' else d['x_m']
     line_step=max(1,round(q['line_spacing_m']/h))*h
     nlines=int(math.floor((across-2*margin)/line_step))+1 if q['mode']=='3D' else 1
-    detail=min(c['coffin']['board_m'],(.004 if c.get('geometry_version',1)>=2 else .008) if c['targets']['bones'] else .02,.006*math.sqrt(state(c)['iron']) if c['targets']['iron'] else .02,.008 if c['targets']['pottery'] else .02)
+    board=c['coffin']['board_m'];bone_scale=1.;iron=state(c)['iron']
+    if c.get('graves') is not None:
+        from cemetery_geometry import grave_state
+        board=min([.02]+[g['container']['wall_m'] for g in c['graves'] if g['construction']!='earth'])
+        bone_scale=min([g['body']['stature_m']/1.75 for g in c['graves'] if g['contents']['bones']] or [1.])
+        iron=min([grave_state(c,g)['iron'] for g in c['graves'] if g['contents']['iron']] or [1.])
+    detail=min(board,(.004*bone_scale if c.get('geometry_version',1)>=2 else .008) if targets['bones'] else .02,.006*math.sqrt(iron) if targets['iron'] else .02,.008 if targets['pottery'] else .02)
     return dict(cells=cells,dt_s=dt,iterations=math.ceil(q['time_window_ns']*1e-9/dt),estimated_RAM_GB_range=[.15+cells*(200 if q['dispersive'] else 80)/1e9,.30+cells*(800 if q['dispersive'] else 200)/1e9],
        wavelength_min_m=wavelength,recommended_cell_m=min(wavelength/15,detail/3),points_per_wavelength=wavelength/h,
        sampling_limit_m=C/(4*2.5*f*math.sqrt(float(e['subsoil'][0].real))),
@@ -182,6 +215,9 @@ def geometry(c,control=False):
     Geometry is parametric, not anatomical mesh reconstruction.
     """
     if control: return []
+    if c.get('graves') is not None:
+        from cemetery_geometry import geometry_v3
+        return geometry_v3(c,GeometryRNG)
     if c.get('geometry_version',1)>=2:
         from realistic_geometry import geometry_v2
         return geometry_v2(c,state(c),GeometryRNG(c['seed']+201))
@@ -264,6 +300,8 @@ def latent(c):
 
 def material_at(c,X,Y,D,objects,field=None):
     X,Y,D=np.broadcast_arrays(X,Y,D); names=['air','subsoil','topsoil','fill','wood','bone','pottery','water','rust','pec']+[f'{base}_{i}' for base in ['subsoil','topsoil'] for i in range(13)]
+
+    if c.get('graves') is not None:names+=['stone']+[f'{k}_g{i}' for i in range(len(c['graves'])) for k in ['fill','wood']]
     ids={k:i for i,k in enumerate(names)}; a=np.full(X.shape,ids['subsoil'],np.int16)
     a[D<0]=ids['air']; a[(D>=0)&(D<c['soil']['topsoil_thickness_m'])]=ids['topsoil']
     if field is not None and c['soil']['heterogeneity']>0:
@@ -271,22 +309,12 @@ def material_at(c,X,Y,D,objects,field=None):
         bins=np.rint(np.clip(v[ix,iy,iz],-3,3)*2+6).astype(int)
         for base in ['subsoil','topsoil']:
             mask=a==ids[base]; a[mask]=ids[base+'_0']+bins[mask]
-    bounds=[(float(v.min()),float(v.max())) for v in [X,Y,D]]
+    from cemetery_geometry import bounds as object_bounds, contains
+    grid_bounds=[(float(v.min()),float(v.max())) for v in [X,Y,D]]
     for o in objects:
-        if o['kind']=='box':lo,hi=o['a'],o['b']
-        elif o['kind'] in ['sphere','ellipsoid']:
-            rr=[o['r']]*3 if o['kind']=='sphere' else o['r'];lo=[o['p'][k]-rr[k] for k in range(3)];hi=[o['p'][k]+rr[k] for k in range(3)]
-        else:lo=[min(o['a'][k],o['b'][k])-o['r'] for k in range(3)];hi=[max(o['a'][k],o['b'][k])+o['r'] for k in range(3)]
-        if any(bounds[k][1]<lo[k] or bounds[k][0]>hi[k] for k in range(3)):continue
-        if o['kind']=='box':
-            m=(X>=o['a'][0])&(X<o['b'][0])&(Y>=o['a'][1])&(Y<o['b'][1])&(D>=o['a'][2])&(D<o['b'][2])
-        elif o['kind']=='ellipsoid':m=((X-o['p'][0])/o['r'][0])**2+((Y-o['p'][1])/o['r'][1])**2+((D-o['p'][2])/o['r'][2])**2<=1
-        elif o['kind']=='sphere': m=(X-o['p'][0])**2+(Y-o['p'][1])**2+(D-o['p'][2])**2<=o['r']**2
-        else:
-            p=np.array(o['a']); v=np.array(o['b'])-p; vv=float(v@v)
-            u=((X-p[0])*v[0]+(Y-p[1])*v[1]+(D-p[2])*v[2])/vv
-            m=(u>=0)&(u<=1)&((X-p[0]-u*v[0])**2+(Y-p[1]-u*v[1])**2+(D-p[2]-u*v[2])**2<=o['r']**2)
-        a[m]=ids[o['mat']]
+        lo,hi=object_bounds(o)
+        if any(grid_bounds[k][1]<lo[k] or grid_bounds[k][0]>hi[k] for k in range(3)):continue
+        a[contains(o,X,Y,D)]=ids[o['mat']]
     return a,names
 
 
@@ -344,7 +372,12 @@ def write_input(c,path,control=False):
                             box(a,b,base+'_'+str(bi))
         def coord(p): return [snap(p[0],h),snap(p[1],h),snap(surface-p[2],h)]
         for o in objs:
-            if o['kind']=='box':
+            if 'frame' in o or o['kind']=='loft':
+                from cemetery_geometry import voxel_boxes
+                count=0
+                for va,vb in voxel_boxes(o,h,ext,surface):box(va,vb,o['mat']);count+=1
+                if not count:omitted.append(dict(reason='no occupied mesh cell centres',object=o))
+            elif o['kind']=='box':
                 a=coord(o['a']); b=coord(o['b']); lo=[min(x,y) for x,y in zip(a,b)]; hi=[max(x,y) for x,y in zip(a,b)]; box(lo,hi,o['mat'])
             elif o['kind']=='ellipsoid':
                 if min(o['r'])<h:
@@ -369,7 +402,7 @@ def write_input(c,path,control=False):
     step=[est['actual_trace_spacing_m'],0,0] if along=='x' else [0,est['actual_trace_spacing_m'],0]
     lines += [f'#waveform: ricker 1 {q["frequency_MHz"]*1e6:.10g} pulse',f'#hertzian_dipole: {q["polarisation"]} {point(source)} pulse',f'#rx: {point(recv)}',f'#src_steps: {point(step)}',f'#rx_steps: {point(step)}']
     path.write_text('\n'.join(lines)+'\n')
-    return dict(file=path.name,ntraces=est['ntrace'],actual_section_coordinate_m=(section if mode=='2D' else cross),frequency_MHz=q['frequency_MHz'],mode=mode,profile_axis=along,section_offset_m=q['section_offset_m'],start_m=start,trace_spacing_m=est['actual_trace_spacing_m'],tx_rx_offset_m=offset,receiver_component='E'+q['polarisation'],materials=tables,estimate=est,control=control,omitted_subcell_primitives=omitted)
+    return dict(file=path.name,ntraces=est['ntrace'],actual_section_coordinate_m=(section if mode=='2D' else cross),frequency_MHz=q['frequency_MHz'],mode=mode,profile_axis=along,section_offset_m=q['section_offset_m'],start_m=start,trace_spacing_m=est['actual_trace_spacing_m'],tx_rx_offset_m=offset,receiver_component='E'+q['polarisation'],materials=tables,estimate=est,control=control,geometry_rasterization=('cell-centre occupancy; ordered rotated solids' if c.get('graves') is not None else 'native primitives'),omitted_subcell_primitives=omitted)
 
 
 def plot_geometry(c,out):
@@ -381,6 +414,7 @@ def plot_geometry(c,out):
     colors=['#dce9e4','#bcab8d','#737856','#c9ad88','#765038','#e6dbc0','#aa6041','#669ba5','#966b42','#3c4140']
     def tint(hexcol,factor):return '#'+''.join(f'{min(255,max(0,round(int(hexcol[i:i+2],16)*factor))):02x}' for i in [1,3,5])
     colors += [tint(base,1-(i-6)*.025) for base in ['#bcab8d','#737856'] for i in range(13)]
+    if c.get('graves') is not None:colors+=['#999b91']+[color for g in c['graves'] for color in ['#c9ad88','#765038']]
     cmap=ListedColormap(colors)
     for ax,plane in zip(axes,['xy','xz','yz']):
         u=np.linspace(0,d['y_m'] if plane=='yz' else d['x_m'],650);v=np.linspace(0,d['y_m'] if plane=='xy' else d['soil_depth_m'],420);U,V=np.meshgrid(u,v)
@@ -416,6 +450,7 @@ def generate(c,out,allow=False,raster=False):
             for control in [False,True]:
                 name=f'f{f:g}_line{li:03d}_'+('background' if control else 'burial')+'.in'
                 job=write_input(cf,out/name,control); job['underresolved']=cf['survey']['cell_m']>job['estimate']['recommended_cell_m']*1.02; manifest['jobs'].append(job)
+    manifest['dependency_sha256']={name:hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest() for name in ['cemetery_geometry.py','realistic_geometry.py','anatomy.json']}
     (out/'manifest.json').write_text(json.dumps(manifest,indent=2)); plot_geometry(c,out/'geometry.png')
     print(json.dumps(dict(directory=str(out.resolve()),jobs=len(manifest['jobs']),estimate=est,underresolved=manifest['underresolved']),indent=2))
 

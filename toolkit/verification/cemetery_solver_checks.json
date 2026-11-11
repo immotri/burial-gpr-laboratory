@@ -1,0 +1,26 @@
+[
+  {
+    "mode": "2D",
+    "cell_m": 0.02,
+    "frequency_MHz": 500,
+    "time_window_ns": 12,
+    "geometry": "27-degree rotated stepped stone cist with skeletal contents",
+    "input_sha256": "01d8fea248a6b47080bd70ed10b94a602779c5afc36d8d616d7d7d386caeaa02",
+    "samples": 261,
+    "peak_receiver_amplitude": 675.1461181640625,
+    "omitted_subcell_volumes": 0,
+    "status": "completed; finite receiver samples; under-resolved pipeline check only"
+  },
+  {
+    "mode": "3D",
+    "cell_m": 0.04,
+    "frequency_MHz": 500,
+    "time_window_ns": 12,
+    "geometry": "27-degree rotated stepped stone cist with skeletal contents",
+    "input_sha256": "089a07cdec1889ca0797fa38a3eb871886c5b14cb6b2c235a21d0d1eac0bdeb5",
+    "samples": 160,
+    "peak_receiver_amplitude": 254.09498596191406,
+    "omitted_subcell_volumes": 354,
+    "status": "completed; finite receiver samples; under-resolved pipeline check only"
+  }
+]
