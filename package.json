@@ -1,0 +1,8 @@
+{
+  "name": "burial-gpr-laboratory",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Procedural burial models, linked material sections and gprMax simulation export",
+  "license": "MIT"
+}

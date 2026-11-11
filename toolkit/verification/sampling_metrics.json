@@ -1,0 +1,37 @@
+{
+  "time_gate_ns": [
+    15.0,
+    60.0
+  ],
+  "metric": "relative L2 error after linear spatial interpolation, same sampled support; not detection probability",
+  "results": [
+    {
+      "spacing_m": 0.1,
+      "stride": 1,
+      "phases": 1,
+      "best_relative_reconstruction_error": 0.0,
+      "worst_relative_reconstruction_error": 0.0
+    },
+    {
+      "spacing_m": 0.2,
+      "stride": 2,
+      "phases": 2,
+      "best_relative_reconstruction_error": 0.7196527349118116,
+      "worst_relative_reconstruction_error": 0.7628308143624987
+    },
+    {
+      "spacing_m": 0.5,
+      "stride": 5,
+      "phases": 5,
+      "best_relative_reconstruction_error": 0.9753062538816961,
+      "worst_relative_reconstruction_error": 1.167968124995687
+    },
+    {
+      "spacing_m": 1.0,
+      "stride": 10,
+      "phases": 10,
+      "best_relative_reconstruction_error": 1.0294082490581113,
+      "worst_relative_reconstruction_error": 1.3759502557181822
+    }
+  ]
+}
